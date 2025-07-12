@@ -1,0 +1,328 @@
+-- Script Searcher UI with Fade-in Animation, Small 18x20 Copy/Execute Buttons,
+-- and a Persistent Toggle Button ("⏯️" icon, gray, 0.5 transparency) to Open/Close the UI
+
+local HttpService = game:GetService("HttpService")
+local TweenService = game:GetService("TweenService")
+local CoreGui = game:GetService("CoreGui")
+
+-- Main UI Setup
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "ScriptSearcher"
+ScreenGui.Parent = CoreGui
+
+-- Sidebar Frame (Detached, can be hidden/shown)
+local Sidebar = Instance.new("Frame")
+Sidebar.Name = "Sidebar"
+Sidebar.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+Sidebar.Size = UDim2.new(0, 450, 1, -100)
+Sidebar.Position = UDim2.new(0, 25, 0, 50)
+Sidebar.AnchorPoint = Vector2.new(0, 0)
+Sidebar.BorderSizePixel = 0
+Sidebar.Visible = true
+Sidebar.Parent = ScreenGui
+
+Sidebar.ClipsDescendants = true
+Sidebar.BackgroundTransparency = 1 -- Start fully transparent for fade-in
+
+-- Persistent Toggle Button (⏯️ icon)
+local ToggleBtn = Instance.new("TextButton")
+ToggleBtn.Name = "ToggleBtn"
+ToggleBtn.BackgroundTransparency = 0.5
+ToggleBtn.Size = UDim2.new(0, 44, 0, 44)
+ToggleBtn.Position = UDim2.new(0, 10, 0, 10)
+ToggleBtn.Text = "⏯️"
+ToggleBtn.TextColor3 = Color3.fromRGB(160,160,160)
+ToggleBtn.TextScaled = true
+ToggleBtn.Font = Enum.Font.GothamBold
+ToggleBtn.BackgroundColor3 = Color3.fromRGB(50,50,50)
+ToggleBtn.AutoButtonColor = true
+ToggleBtn.ZIndex = 10
+ToggleBtn.Parent = ScreenGui
+
+-- Always on top of sidebar
+ToggleBtn.AnchorPoint = Vector2.new(0, 0)
+ToggleBtn.Visible = true
+
+-- TopBar with Hide Button (hidden, functionality now with ToggleBtn)
+local TopBar = Instance.new("Frame")
+TopBar.Size = UDim2.new(1, 0, 0, 40)
+TopBar.BackgroundTransparency = 1
+TopBar.Parent = Sidebar
+
+-- Search Bar
+local SearchBar = Instance.new("TextBox")
+SearchBar.PlaceholderText = "Search scripts..."
+SearchBar.Size = UDim2.new(1, -60, 0, 36)
+SearchBar.Position = UDim2.new(0, 10, 0, 45)
+SearchBar.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+SearchBar.TextColor3 = Color3.new(1,1,1)
+SearchBar.TextSize = 18
+SearchBar.Parent = Sidebar
+SearchBar.BorderSizePixel = 0
+
+local SearchBtn = Instance.new("TextButton")
+SearchBtn.Size = UDim2.new(0, 40, 0, 36)
+SearchBtn.Position = UDim2.new(1, -50, 0, 45)
+SearchBtn.BackgroundColor3 = Color3.fromRGB(70, 130, 200)
+SearchBtn.Text = "🔍"
+SearchBtn.TextColor3 = Color3.new(1,1,1)
+SearchBtn.TextSize = 20
+SearchBtn.Parent = Sidebar
+SearchBtn.BorderSizePixel = 0
+
+-- Scrolling Scripts Panel
+local ScriptScroll = Instance.new("ScrollingFrame")
+ScriptScroll.Size = UDim2.new(1, -20, 1, -180)
+ScriptScroll.Position = UDim2.new(0, 10, 0, 90)
+ScriptScroll.CanvasSize = UDim2.new(0,0,0,0)
+ScriptScroll.BackgroundTransparency = 1
+ScriptScroll.BorderSizePixel = 0
+ScriptScroll.ScrollBarThickness = 8
+ScriptScroll.Parent = Sidebar
+
+-- Pagination Panel
+local PagePanel = Instance.new("Frame")
+PagePanel.Name = "PagePanel"
+PagePanel.Size = UDim2.new(1, 0, 0, 60)
+PagePanel.Position = UDim2.new(0, 0, 1, -60)
+PagePanel.BackgroundTransparency = 1
+PagePanel.Parent = Sidebar
+
+-- Pagination Buttons (1-10)
+local PageButtons = {}
+local currentPage = 1
+local totalPages = 1
+
+for i = 1, 10 do
+    local btn = Instance.new("ImageButton")
+    btn.Size = UDim2.new(0, 38, 0, 38)
+    btn.Position = UDim2.new(0, 10 + (i-1)*42, 0.5, -19)
+    btn.BackgroundTransparency = 1
+    btn.Image = "rbxassetid://14501585603" -- circle icon
+    btn.ImageColor3 = Color3.fromRGB(50,50,50)
+    btn.Parent = PagePanel
+
+    local lbl = Instance.new("TextLabel")
+    lbl.Size = UDim2.new(1, 0, 1, 0)
+    lbl.BackgroundTransparency = 1
+    lbl.Text = tostring(i)
+    lbl.Font = Enum.Font.GothamBold
+    lbl.TextColor3 = Color3.new(1,1,1)
+    lbl.TextScaled = true
+    lbl.Parent = btn
+
+    btn.MouseButton1Click:Connect(function()
+        if currentPage ~= i then
+            currentPage = i
+            updateScripts()
+        end
+    end)
+    PageButtons[i] = btn
+end
+
+-- Script List Storage
+local scriptResults = {}
+local scriptsPerPage = 6
+
+-- Helper: Clear Script Panel
+local function clearScriptPanel()
+    for _, child in ipairs(ScriptScroll:GetChildren()) do
+        if child:IsA("Frame") then
+            child:Destroy()
+        end
+    end
+end
+
+-- Helper: Create script card
+local function createScriptCard(scriptData, yPos)
+    local Card = Instance.new("Frame")
+    Card.Size = UDim2.new(1, -6, 0, 80)
+    Card.Position = UDim2.new(0, 3, 0, yPos)
+    Card.BackgroundColor3 = Color3.fromRGB(40, 40, 50)
+    Card.BorderSizePixel = 0
+    Card.Parent = ScriptScroll
+
+    local Title = Instance.new("TextLabel")
+    Title.Size = UDim2.new(1, -120, 0, 30)
+    Title.Position = UDim2.new(0, 10, 0, 5)
+    Title.BackgroundTransparency = 1
+    Title.Text = scriptData.title
+    Title.Font = Enum.Font.GothamBold
+    Title.TextSize = 20
+    Title.TextColor3 = Color3.new(1,1,1)
+    Title.TextXAlignment = Enum.TextXAlignment.Left
+    Title.Parent = Card
+
+    local Slug = Instance.new("TextLabel")
+    Slug.Size = UDim2.new(1, -120, 0, 20)
+    Slug.Position = UDim2.new(0, 10, 0, 35)
+    Slug.BackgroundTransparency = 1
+    Slug.Text = "Slug: "..scriptData.slug
+    Slug.Font = Enum.Font.Gotham
+    Slug.TextSize = 14
+    Slug.TextColor3 = Color3.fromRGB(180,180,180)
+    Slug.TextXAlignment = Enum.TextXAlignment.Left
+    Slug.Parent = Card
+
+    -- Execute Button (smaller 18x20, lower)
+    local ExecBtn = Instance.new("TextButton")
+    ExecBtn.Size = UDim2.new(0, 18, 0, 20)
+    ExecBtn.Position = UDim2.new(1, -48, 0, 55)
+    ExecBtn.BackgroundColor3 = Color3.fromRGB(70, 200, 100)
+    ExecBtn.Text = "▶"
+    ExecBtn.TextColor3 = Color3.new(1,1,1)
+    ExecBtn.Font = Enum.Font.GothamBlack
+    ExecBtn.TextSize = 14
+    ExecBtn.BorderSizePixel = 0
+    ExecBtn.Parent = Card
+
+    -- Copy Button (smaller 18x20, lower)
+    local CopyBtn = Instance.new("TextButton")
+    CopyBtn.Size = UDim2.new(0, 18, 0, 20)
+    CopyBtn.Position = UDim2.new(1, -24, 0, 55)
+    CopyBtn.BackgroundColor3 = Color3.fromRGB(80, 120, 255)
+    CopyBtn.Text = "⧉"
+    CopyBtn.TextColor3 = Color3.new(1,1,1)
+    CopyBtn.Font = Enum.Font.GothamBlack
+    CopyBtn.TextSize = 13
+    CopyBtn.BorderSizePixel = 0
+    CopyBtn.Parent = Card
+
+    -- Execute script action
+    ExecBtn.MouseButton1Click:Connect(function()
+        if scriptData.script then
+            loadstring(scriptData.script)()
+        else
+            local scriptDetailJson = game:HttpGet("https://scriptblox.com/api/script/"..scriptData.slug)
+            local detail = HttpService:JSONDecode(scriptDetailJson)
+            if detail.result and detail.result.script then
+                loadstring(detail.result.script)()
+            end
+        end
+    end)
+
+    -- Copy script action
+    CopyBtn.MouseButton1Click:Connect(function()
+        if setclipboard then
+            if scriptData.script then
+                setclipboard(scriptData.script)
+            else
+                local scriptDetailJson = game:HttpGet("https://scriptblox.com/api/script/"..scriptData.slug)
+                local detail = HttpService:JSONDecode(scriptDetailJson)
+                if detail.result and detail.result.script then
+                    setclipboard(detail.result.script)
+                end
+            end
+        end
+    end)
+end
+
+-- Update Script Results in UI
+function updateScripts()
+    clearScriptPanel()
+    -- Highlight page buttons
+    for i,btn in ipairs(PageButtons) do
+        if i == currentPage then
+            btn.ImageColor3 = Color3.fromRGB(70,130,200)
+        else
+            btn.ImageColor3 = Color3.fromRGB(50,50,50)
+        end
+    end
+
+    -- Pagination calculation
+    totalPages = math.ceil(#scriptResults / scriptsPerPage)
+    if totalPages < 1 then totalPages = 1 end
+    for i, btn in ipairs(PageButtons) do
+        btn.Visible = (i <= totalPages)
+    end
+
+    local startIdx = (currentPage - 1) * scriptsPerPage + 1
+    local endIdx = math.min(startIdx + scriptsPerPage - 1, #scriptResults)
+    local yOffset = 0
+    for i = startIdx, endIdx do
+        createScriptCard(scriptResults[i], yOffset)
+        yOffset = yOffset + 88
+    end
+    ScriptScroll.CanvasSize = UDim2.new(0,0,0, yOffset+10)
+end
+
+-- Fetch scripts from API
+local function fetchScripts(query)
+    local url = "https://scriptblox.com/api/script/search?q="..HttpService:UrlEncode(query)
+    local ok, scriptJson = pcall(function()
+        return game:HttpGet(url)
+    end)
+    if ok then
+        local scripts = HttpService:JSONDecode(scriptJson)
+        scriptResults = {}
+        for i, script in ipairs(scripts.result.scripts) do
+            table.insert(scriptResults, {
+                title = script.title,
+                slug = script.slug,
+                script = script.script or nil -- may be missing, so handle lazily
+            })
+        end
+    else
+        scriptResults = {}
+    end
+    currentPage = 1
+    updateScripts()
+end
+
+-- Initial fetch
+fetchScripts("admin")
+
+SearchBtn.MouseButton1Click:Connect(function()
+    fetchScripts(SearchBar.Text)
+end)
+SearchBar.FocusLost:Connect(function(enter)
+    if enter then
+        fetchScripts(SearchBar.Text)
+    end
+end)
+
+-- Animate sidebar in at start with Google Slides "fade in"
+Sidebar.Position = UDim2.new(0, 25, 0, 80)
+Sidebar.BackgroundTransparency = 1
+
+-- State for sidebar
+local sidebarOpen = true
+
+-- Fade-in and Fade-out functions (Google Slides style)
+local function FadeInSidebar()
+    Sidebar.Visible = true
+    Sidebar.BackgroundTransparency = 1
+    Sidebar.Position = UDim2.new(0, 25, 0, 80)
+    TweenService:Create(Sidebar, TweenInfo.new(0.4, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+        BackgroundTransparency = 0,
+        Position = UDim2.new(0, 25, 0, 50)
+    }):Play()
+    sidebarOpen = true
+end
+local function FadeOutSidebar()
+    TweenService:Create(Sidebar, TweenInfo.new(0.4, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {
+        BackgroundTransparency = 1,
+        Position = UDim2.new(0, -500, 0, 80)
+    }):Play()
+    task.wait(0.4)
+    Sidebar.Visible = false
+    sidebarOpen = false
+end
+
+-- Toggle Button logic
+ToggleBtn.MouseButton1Click:Connect(function()
+    if sidebarOpen then
+        FadeOutSidebar()
+    else
+        FadeInSidebar()
+    end
+end)
+
+-- Optionally: draggable sidebar
+Sidebar.Active = true
+Sidebar.Draggable = true -- Roblox supports .Draggable for Frames
+
+-- Show sidebar on start
+FadeInSidebar()
+
+-- End of Script
